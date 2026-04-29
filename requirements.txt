@@ -1,0 +1,14 @@
+torch
+torch_geometric
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+networkx
+flask
+flask-cors
+tqdm
+scapy
+requests
+pywebview

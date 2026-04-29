@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DDoS Detection · GNNShield</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card: #1a1d27;
+      --border: #2a2f3d;
+      --text: #e8eaef;
+      --muted: #9aa3b5;
+      --accent: #4f8ef7;
+      --attack: #e05c5c;
+      --benign: #4caf7d;
+      --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.5;
+      padding-top: 56px;
+    }
+    .app-header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.65rem 7.5rem 0.65rem 1.25rem;
+      background: rgba(15, 17, 23, 0.92);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+    }
+    .app-header h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .mode-btns {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .mode-btns button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--muted);
+      padding: 0.4rem 0.9rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.88rem;
+    }
+    .mode-btns button.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(79, 142, 247, 0.12);
+    }
+    .btn-stop-close {
+      position: fixed;
+      top: 0.55rem;
+      right: 0.6rem;
+      z-index: 1001;
+      appearance: none;
+      border: none;
+      border-radius: 6px;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: #c62828;
+      color: #fff;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+    }
+    .btn-stop-close:hover { background: #b71c1c; }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1rem 1.25rem 2.5rem;
+    }
+    .pane { display: none; }
+    .pane.visible { display: block; }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      min-width: 200px;
+    }
+    .field label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    select {
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.45rem 0.6rem;
+      font-size: 0.9rem;
+      min-width: 220px;
+    }
+    .btn {
+      appearance: none;
+      border-radius: 6px;
+      padding: 0.5rem 1rem;
+      font-size: 0.88rem;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+    }
+    .btn.primary {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .btn.danger { border-color: var(--attack); color: var(--attack); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .progress {
+      display: none;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 1rem;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .progress.on { display: flex; }
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .hint { color: var(--muted); font-size: 0.86rem; margin: 0 0 0.75rem; min-height: 1.25rem; }
+    .hint.warn { color: #e0a84f; }
+    .metrics, .net-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.65rem;
+      margin-bottom: 1rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+    }
+    .card .label {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+    .card .value {
+      font-size: 1.2rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .card .value.placeholder { color: var(--muted); font-weight: 400; font-size: 0.95rem; }
+    .table-title {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0 0 0.45rem;
+    }
+    table.net-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      margin-bottom: 1.25rem;
+    }
+    .net-table th, .net-table td {
+      text-align: left;
+      padding: 0.45rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .net-table th {
+      color: var(--muted);
+      font-size: 0.65rem;
+      text-transform: uppercase;
+    }
+    .cm-wrap {
+      margin: 1rem 0;
+      text-align: center;
+    }
+    .cm-wrap img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .charts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+      gap: 1.5rem;
+      margin-top: 1.5rem;
+    }
+    .chart-box {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      height: 340px;
+      display: flex;
+      flex-direction: column;
+    }
+    .chart-box h3 {
+      margin: 0 0 1rem;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      border-left: 3px solid var(--accent);
+      padding-left: 0.75rem;
+    }
+    .chart-inner { flex: 1; position: relative; min-height: 0; }
+    .live-dataset {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+    .live-dataset strong { color: var(--text); }
+    .live-counters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .live-counters .card { min-width: 150px; }
+    .live-table-wrap {
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      max-height: 440px;
+    }
+    table.live-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    .live-table th {
+      position: sticky;
+      top: 0;
+      background: var(--card);
+      z-index: 1;
+      text-align: left;
+      padding: 0.5rem 0.55rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.65rem;
+      text-transform: uppercase;
+    }
+    .live-table td {
+      padding: 0.45rem 0.55rem;
+      border-bottom: 1px solid var(--border);
+      font-variant-numeric: tabular-nums;
+    }
+    tr.live-row-attack { border-left: 4px solid var(--attack); }
+    tr.live-row-benign { border-left: 4px solid var(--benign); }
+  </style>
+</head>
+<body>
+  <button type="button" class="btn-stop-close" id="stopCloseBtn">Stop &amp; Close</button>
+  <header class="app-header">
+    <h1>DDoS Detection · GNNShield</h1>
+    <div class="mode-btns" role="tablist">
+      <button type="button" class="active" id="tabAnalyse" data-mode="analyse">Analyse Dataset</button>
+      <button type="button" id="tabLive" data-mode="live">Live Detection</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <section id="pane-analyse" class="pane visible" aria-label="Analyse dataset">
+      <div class="row">
+        <div class="field">
+          <label for="trainDataset">Training Dataset</label>
+          <select id="trainDataset"></select>
+        </div>
+        <div class="field">
+          <label for="detectDataset">Detection Dataset</label>
+          <select id="detectDataset"></select>
+        </div>
+        <button type="button" class="btn primary" id="trainBtn">Train Model</button>
+        <button type="button" class="btn danger" id="retrainBtn">Retrain</button>
+      </div>
+      <p class="hint" id="trainHint"></p>
+      <div class="progress" id="trainProgress">
+        <div class="spinner" aria-hidden="true"></div>
+        <span>Training…</span>
+      </div>
+
+      <div class="metrics" id="metrics">
+        <div class="card" data-metric="accuracy"><div class="label">Accuracy</div><div class="value placeholder">—</div></div>
+        <div class="card" data-metric="precision"><div class="label">Precision</div><div class="value placeholder">—</div></div>
+        <div class="card" data-metric="recall"><div class="label">Recall</div><div class="value placeholder">—</div></div>
+        <div class="card" data-metric="f1"><div class="label">F1</div><div class="value placeholder">—</div></div>
+      </div>
+
+      <div class="net-cards">
+        <div class="card"><div class="label">Total IPs</div><div class="value placeholder" id="netTotalNodes">—</div></div>
+        <div class="card"><div class="label">Total Flows</div><div class="value placeholder" id="netTotalEdges">—</div></div>
+        <div class="card"><div class="label">Attack IPs</div><div class="value placeholder" id="netAttackNodes">—</div></div>
+        <div class="card"><div class="label">Benign IPs</div><div class="value placeholder" id="netBenignNodes">—</div></div>
+      </div>
+
+      <p class="table-title">Top 10 Most Active IPs</p>
+      <table class="net-table" aria-label="Top IPs">
+        <thead><tr><th>IP Address</th><th>Connections</th><th>Share</th></tr></thead>
+        <tbody id="netTopBody"></tbody>
+      </table>
+
+      <div class="charts">
+        <div class="chart-box">
+          <h3>Training Loss</h3>
+          <div class="chart-inner"><canvas id="chartLoss"></canvas></div>
+        </div>
+        <div class="chart-box">
+          <h3>Validation F1</h3>
+          <div class="chart-inner"><canvas id="chartF1"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="pane-live" class="pane" aria-label="Live detection">
+      <p class="live-dataset">Source: <strong id="liveDatasetLabel">—</strong></p>
+      <div class="row">
+        <div class="field" style="min-width: 150px;">
+          <label>Capture Source</label>
+          <select id="captureSource">
+            <option value="csv">Simulated (CSV)</option>
+            <option value="nic">Real-time (NIC Sniffing)</option>
+          </select>
+        </div>
+        <button type="button" class="btn primary" id="liveStartBtn">Start Live Detection</button>
+        <button type="button" class="btn danger" id="liveStopBtn" disabled>Stop</button>
+      </div>
+      <p class="hint" id="liveStreamHint"></p>
+      <div class="live-counters">
+        <div class="card"><div class="label">Packets Processed</div><div class="value" id="cntTotal">0</div></div>
+        <div class="card"><div class="label">Attacks Detected</div><div class="value" id="cntAttacks">0</div></div>
+        <div class="card"><div class="label">Detection Rate</div><div class="value" id="cntRate">0.0%</div></div>
+      </div>
+      <div class="live-table-wrap">
+        <table class="live-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Source IP</th>
+              <th>Destination IP</th>
+              <th>Prediction</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody id="liveTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+(function () {
+  var chartLoss = null;
+  var chartF1 = null;
+  var eventSource = null;
+
+  var paneAnalyse = document.getElementById("pane-analyse");
+  var paneLive = document.getElementById("pane-live");
+  var tabAnalyse = document.getElementById("tabAnalyse");
+  var tabLive = document.getElementById("tabLive");
+  var trainDataset = document.getElementById("trainDataset");
+  var detectDataset = document.getElementById("detectDataset");
+  var captureSource = document.getElementById("captureSource");
+  var trainBtn = document.getElementById("trainBtn");
+  var retrainBtn = document.getElementById("retrainBtn");
+  var trainHint = document.getElementById("trainHint");
+  var trainProgress = document.getElementById("trainProgress");
+  var liveDatasetLabel = document.getElementById("liveDatasetLabel");
+  var liveStreamHint = document.getElementById("liveStreamHint");
+  var liveStartBtn = document.getElementById("liveStartBtn");
+  var liveStopBtn = document.getElementById("liveStopBtn");
+  var cntTotal = document.getElementById("cntTotal");
+  var cntAttacks = document.getElementById("cntAttacks");
+  var cntRate = document.getElementById("cntRate");
+  var liveTableBody = document.getElementById("liveTableBody");
+
+  var tickColor = "#9aa3b5";
+  var gridColor = "rgba(42, 47, 61, 0.85)";
+
+  function escapeHtml(s) {
+    if (!s) return "";
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function fmtPctRatio(x) {
+    if (x == null || Number.isNaN(Number(x))) return "—";
+    var n = Number(x) * 100;
+    return n.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 }) + "%";
+  }
+
+  function updateLiveDatasetLabel() {
+    if (captureSource.value === "nic") {
+      liveDatasetLabel.textContent = "Network Interface (Live)";
+    } else {
+      var v = detectDataset.value || trainDataset.value || "—";
+      liveDatasetLabel.textContent = v || "—";
+    }
+  }
+
+  captureSource.addEventListener("change", updateLiveDatasetLabel);
+
+  function setMode(mode) {
+    var analyse = mode === "analyse";
+    paneAnalyse.classList.toggle("visible", analyse);
+    paneLive.classList.toggle("visible", !analyse);
+    tabAnalyse.classList.toggle("active", analyse);
+    tabLive.classList.toggle("active", !analyse);
+    if (!analyse) updateLiveDatasetLabel();
+  }
+
+  tabAnalyse.addEventListener("click", function () { setMode("analyse"); });
+  tabLive.addEventListener("click", function () { setMode("live"); });
+
+  function setTrainProgress(on) {
+    trainProgress.classList.toggle("on", on);
+    trainBtn.disabled = on;
+    retrainBtn.disabled = on;
+  }
+
+  function clearMetrics() {
+    document.querySelectorAll("#metrics .value").forEach(function (el) {
+      el.textContent = "—";
+      el.classList.add("placeholder");
+    });
+  }
+
+  function destroyCharts() {
+    if (chartLoss) { chartLoss.destroy(); chartLoss = null; }
+    if (chartF1) { chartF1.destroy(); chartF1 = null; }
+  }
+
+  function updateMetrics(data) {
+    var map = {
+      accuracy: function () { return fmtPctRatio(data.accuracy); },
+      precision: function () { return fmtPctRatio(data.precision); },
+      recall: function () { return fmtPctRatio(data.recall); },
+      f1: function () { return fmtPctRatio(data.f1); }
+    };
+    document.querySelectorAll("#metrics .card").forEach(function (card) {
+      var key = card.getAttribute("data-metric");
+      var valEl = card.querySelector(".value");
+      if (!map[key]) return;
+      var t = map[key]();
+      valEl.textContent = t;
+      valEl.classList.toggle("placeholder", t === "—");
+    });
+  }
+
+  function setNetUnavailable() {
+    ["netTotalNodes", "netTotalEdges", "netAttackNodes", "netBenignNodes"].forEach(function (id) {
+      var el = document.getElementById(id);
+      el.textContent = "—";
+      el.classList.add("placeholder");
+    });
+    document.getElementById("netTopBody").innerHTML =
+      "<tr><td colspan=\"3\" style=\"color:var(--muted)\">No data</td></tr>";
+  }
+
+  function updateNetworkStats(data) {
+    var te = Number(data.total_edges) || 0;
+    document.getElementById("netTotalNodes").textContent =
+      Number(data.total_nodes).toLocaleString();
+    document.getElementById("netTotalEdges").textContent = te.toLocaleString();
+    document.getElementById("netAttackNodes").textContent =
+      Number(data.attack_nodes).toLocaleString();
+    document.getElementById("netBenignNodes").textContent =
+      Number(data.benign_nodes).toLocaleString();
+    ["netTotalNodes", "netTotalEdges", "netAttackNodes", "netBenignNodes"].forEach(function (id) {
+      document.getElementById(id).classList.remove("placeholder");
+    });
+    var tb = document.getElementById("netTopBody");
+    tb.innerHTML = "";
+    var top = data.top_connected || [];
+    top.forEach(function (row) {
+      var c = Number(row.connections) || 0;
+      var share = te === 0 ? "0.0%" : ((c / te) * 100).toLocaleString(undefined, {
+        maximumFractionDigits: 1,
+        minimumFractionDigits: 1
+      }) + "%";
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + escapeHtml(String(row.ip)) + "</td>" +
+        "<td>" + c.toLocaleString() + "</td>" +
+        "<td>" + share + "</td>";
+      tb.appendChild(tr);
+    });
+    if (!top.length) {
+      tb.innerHTML = "<tr><td colspan=\"3\" style=\"color:var(--muted)\">No edges.</td></tr>";
+    }
+  }
+
+  async function fetchNetworkStats() {
+    try {
+      var res = await fetch("/network-stats");
+      if (!res.ok) { setNetUnavailable(); return; }
+      var data = await res.json();
+      if (data.error) { setNetUnavailable(); return; }
+      updateNetworkStats(data);
+    } catch (e) {
+      setNetUnavailable();
+    }
+  }
+
+  function buildCharts(history) {
+    if (!history || !Array.isArray(history.train_loss) || !history.train_loss.length) {
+      destroyCharts();
+      return;
+    }
+    var trainLoss = history.train_loss;
+    var valF1 = history.val_f1 || [];
+    destroyCharts();
+    var labels = trainLoss.map(function (_, i) { return String(i + 1); });
+
+    var ctxL = document.getElementById("chartLoss").getContext("2d");
+    chartLoss = new Chart(ctxL, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "Training loss",
+          data: trainLoss,
+          borderColor: "#4f8ef7",
+          tension: 0.15,
+          pointRadius: 0,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: tickColor } },
+          tooltip: {
+            callbacks: {
+              label: function (ctx) {
+                return ctx.dataset.label + ": " +
+                  Number(ctx.parsed.y).toLocaleString(undefined, { maximumFractionDigits: 6 });
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: tickColor }, grid: { color: gridColor } },
+          y: {
+            ticks: {
+              color: tickColor,
+              callback: function (v) {
+                return Number(v).toLocaleString(undefined, { maximumFractionDigits: 4 });
+              }
+            },
+            grid: { color: gridColor }
+          }
+        }
+      }
+    });
+
+    var f1Data = Array.isArray(valF1)
+      ? valF1.map(function (v) { return v == null ? null : v; })
+      : [];
+    var ctxF = document.getElementById("chartF1").getContext("2d");
+    chartF1 = new Chart(ctxF, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "Validation F1",
+          data: f1Data.length ? f1Data : labels.map(function () { return null; }),
+          borderColor: "#c9a0ff",
+          tension: 0.2,
+          pointRadius: 2,
+          spanGaps: false,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: tickColor } },
+          tooltip: {
+            callbacks: {
+              label: function (ctx) {
+                var y = ctx.parsed.y;
+                if (y == null) return ctx.dataset.label + ": —";
+                return ctx.dataset.label + ": " +
+                  Number(y).toLocaleString(undefined, { maximumFractionDigits: 4 });
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: tickColor }, grid: { color: gridColor } },
+          y: {
+            min: 0,
+            max: 1,
+            ticks: {
+              color: tickColor,
+              callback: function (v) {
+                return Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
+              }
+            },
+            grid: { color: gridColor }
+          }
+        }
+      }
+    });
+  }
+
+  async function loadResultsAndCharts() {
+    try {
+      var res = await fetch("/results");
+      if (!res.ok) {
+        clearMetrics();
+        destroyCharts();
+        return;
+      }
+      var data = await res.json();
+      if (data.error) {
+        clearMetrics();
+        destroyCharts();
+        return;
+      }
+      updateMetrics(data);
+      var hist = data.history;
+      if (!hist && data.train_loss) {
+        hist = {
+          train_loss: data.train_loss,
+          val_loss: data.val_loss || [],
+          val_f1: data.val_f1 || []
+        };
+      }
+      buildCharts(hist || {});
+    } catch (e) {
+      clearMetrics();
+      destroyCharts();
+    }
+  }
+
+  async function loadDatasets() {
+    try {
+      var res = await fetch("/list-datasets");
+      var d = await res.json();
+      var list = d.files || [];
+      trainDataset.innerHTML = "";
+      detectDataset.innerHTML = "";
+      if (!list.length) {
+        var o = document.createElement("option");
+        o.value = "";
+        o.textContent = "No CSV files";
+        trainDataset.appendChild(o);
+        detectDataset.appendChild(o.cloneNode(true));
+        return;
+      }
+      list.forEach(function (name) {
+        var o1 = document.createElement("option");
+        o1.value = name;
+        o1.textContent = name;
+        trainDataset.appendChild(o1);
+        var o2 = document.createElement("option");
+        o2.value = name;
+        o2.textContent = name;
+        detectDataset.appendChild(o2);
+      });
+      trainDataset.selectedIndex = 0;
+      detectDataset.selectedIndex = 0;
+      if (detectDataset.value) {
+        await fetch("/set-detection-dataset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: detectDataset.value })
+        }).catch(function () {});
+      }
+      updateLiveDatasetLabel();
+    } catch (e) {
+      trainDataset.innerHTML = "";
+      detectDataset.innerHTML = "";
+      var ox = document.createElement("option");
+      ox.textContent = "unavailable";
+      trainDataset.appendChild(ox);
+      detectDataset.appendChild(ox.cloneNode(true));
+    }
+  }
+
+  detectDataset.addEventListener("change", async function () {
+    updateLiveDatasetLabel();
+    try {
+      await fetch("/set-detection-dataset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: detectDataset.value })
+      });
+    } catch (e) {}
+  });
+
+  async function postTrain(clearFirst) {
+    var fn = trainDataset.value;
+    if (!fn) {
+      trainHint.textContent = "Select a training CSV.";
+      trainHint.classList.add("warn");
+      return;
+    }
+    if (clearFirst) {
+      clearMetrics();
+      destroyCharts();
+    }
+    setTrainProgress(true);
+    trainHint.textContent = "";
+    trainHint.classList.remove("warn");
+    try {
+      var res = await fetch("/train", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: fn })
+      });
+      var body = await res.json().catch(function () { return {}; });
+      if (!res.ok || body.error) {
+        trainHint.textContent = body.error || res.statusText || "Train failed";
+        trainHint.classList.add("warn");
+        return;
+      }
+      trainHint.textContent = "Training finished.";
+      trainHint.classList.remove("warn");
+      await loadResultsAndCharts();
+      await fetchNetworkStats();
+    } catch (e) {
+      trainHint.textContent = String(e.message || e);
+      trainHint.classList.add("warn");
+    } finally {
+      setTrainProgress(false);
+    }
+  }
+
+  trainBtn.addEventListener("click", function () { postTrain(false); });
+  retrainBtn.addEventListener("click", function () { postTrain(true); });
+
+  var totalPkts = 0;
+  var attackPkts = 0;
+
+  function resetLiveCounters() {
+    totalPkts = 0;
+    attackPkts = 0;
+    cntTotal.textContent = "0";
+    cntAttacks.textContent = "0";
+    cntRate.textContent = "0.0%";
+  }
+
+  function updateCounters() {
+    cntTotal.textContent = totalPkts.toLocaleString();
+    cntAttacks.textContent = attackPkts.toLocaleString();
+    var rate = totalPkts === 0 ? 0 : (attackPkts / totalPkts) * 100;
+    cntRate.textContent = rate.toLocaleString(undefined, {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
+    }) + "%";
+  }
+
+  function stopLiveStream() {
+    fetch("/live-stop", { method: "POST" }).catch(function () {});
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    liveStopBtn.disabled = true;
+    liveStartBtn.disabled = false;
+  }
+
+  liveStartBtn.addEventListener("click", function () {
+    if (eventSource) return;
+    liveStreamHint.textContent = "";
+    liveStreamHint.classList.remove("warn");
+    liveTableBody.innerHTML = "";
+    resetLiveCounters();
+    
+    var endpoint = captureSource.value === "nic" ? "/live-packets" : "/live-stream";
+    eventSource = new EventSource(endpoint);
+    liveStopBtn.disabled = false;
+    liveStartBtn.disabled = true;
+
+    eventSource.onmessage = function (ev) {
+      var d;
+      try { d = JSON.parse(ev.data); } catch (e) { return; }
+      if (d.error) {
+        liveStreamHint.textContent = d.error;
+        liveStreamHint.classList.add("warn");
+        stopLiveStream();
+        return;
+      }
+
+      // Handle window-based data (NIC)
+      if (d.total_packets !== undefined) {
+        totalPkts += (d.total_packets || 0);
+        attackPkts += (d.attack_count || 0);
+        updateCounters();
+
+        var flowsToShow = d.all_flows || [];
+        if (flowsToShow.length === 0 && d.suspicious_ips && d.suspicious_ips.length > 0) {
+            // Fallback for older version if all_flows missing
+            d.suspicious_ips.forEach(function(s) {
+                flowsToShow.push({
+                    src_ip: s.ip,
+                    dst_ip: "[Window Alert]",
+                    prediction: 1,
+                    confidence: s.confidence,
+                    alert: true
+                });
+            });
+        }
+
+        flowsToShow.forEach(function(f) {
+            var isAttack = !!f.alert;
+            var tr = document.createElement("tr");
+            tr.className = isAttack ? "live-row-attack" : "live-row-benign";
+            tr.innerHTML =
+                "<td>" + escapeHtml(d.timestamp) + "</td>" +
+                "<td>" + escapeHtml(f.src_ip) + "</td>" +
+                "<td>" + escapeHtml(f.dst_ip) + "</td>" +
+                "<td>" + (isAttack ? "Attack" : "Benign") + "</td>" +
+                "<td>" + (Number(f.confidence) * 100).toFixed(1) + "%</td>";
+            liveTableBody.insertBefore(tr, liveTableBody.firstChild);
+        });
+      } 
+      // Handle flow-based data (CSV)
+      else if (d.src_ip !== undefined) {
+        totalPkts += 1;
+        if (d.alert) attackPkts += 1;
+        updateCounters();
+
+        var isAttack = !!d.alert;
+        var tr = document.createElement("tr");
+        tr.className = isAttack ? "live-row-attack" : "live-row-benign";
+        tr.innerHTML =
+            "<td>" + escapeHtml(d.timestamp) + "</td>" +
+            "<td>" + escapeHtml(d.src_ip) + "</td>" +
+            "<td>" + escapeHtml(d.dst_ip) + "</td>" +
+            "<td>" + (isAttack ? "Attack" : "Benign") + "</td>" +
+            "<td>" + (Number(d.confidence) * 100).toFixed(1) + "%</td>";
+        liveTableBody.insertBefore(tr, liveTableBody.firstChild);
+      }
+
+      while (liveTableBody.rows.length > 50) {
+        liveTableBody.removeChild(liveTableBody.lastChild);
+      }
+    };
+
+    eventSource.onerror = function () { stopLiveStream(); };
+  });
+
+  liveStopBtn.addEventListener("click", function () { stopLiveStream(); });
+
+  document.getElementById("stopCloseBtn").addEventListener("click", function () {
+    stopLiveStream();
+    fetch("/shutdown", { method: "POST" })
+      .catch(function () {})
+      .finally(function () { window.close(); });
+  });
+
+  (async function boot() {
+    await loadDatasets();
+    await loadResultsAndCharts();
+    await fetchNetworkStats();
+  })();
+})();
+  </script>
+</body>
+</html>
